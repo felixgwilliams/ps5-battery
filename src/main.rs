@@ -1,10 +1,10 @@
 use anyhow::bail;
+use clap::{command, Parser};
+use hidapi::{DeviceInfo, HidApi};
 use std::{
     cmp::min,
     fmt::{Debug, Display},
 };
-
-use hidapi::HidApi;
 
 const VENDOR_ID: u16 = 0x054c;
 const PRODUCT_ID: u16 = 0x0ce6;
@@ -120,51 +120,97 @@ impl TryFrom<usize> for ConnType {
         }
     }
 }
+fn print_ds_info<T: Display>(
+    id: T,
+    api: &HidApi,
+    device: &DeviceInfo,
+    show_serial_number: bool,
+) -> Result<(), anyhow::Error> {
+    if show_serial_number {
+        println!(
+            "Dualsense {} (S/N {}):",
+            id,
+            device.serial_number().unwrap_or("N/A")
+        );
+    } else {
+        println!("Dualsense {}:", id,);
+    }
+    let open_device = device
+        .open_device(api)
+        .or_else(|_e| bail!("Could not find dualsense"))?;
+
+    let mut buf = [0u8; 64];
+    buf[0] = 0x05;
+    open_device.get_feature_report(&mut buf[..])?;
+
+    let mut buf = [0u8; 100];
+    let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
+    if buf[0] != 0x31 {
+        bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
+    }
+    let conn_type = ConnType::try_from(bytes_read)?;
+    let report = match conn_type {
+        ConnType::Bluetooth => &buf[2..],
+        ConnType::Usb => &buf[1..],
+    };
+
+    let battery_0 = report[52];
+    let battery_1 = report[53];
+    let plug_state: PlugState = battery_1.into();
+
+    let battery_level_raw = min(8, battery_0 & 0x0f);
+
+    let batt_level = battery_level_raw as f64 / 8.0f64;
+    let battery_status: BatteryState = ((battery_0 & 0xF0) >> 4).into();
+
+    println!("Battery Level: {}%", batt_level * 100.0);
+    println!("Battery Status {}", battery_status);
+    println!("Plug Status: {}", plug_state);
+    Ok(())
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    /// Show serial number for controllers.
+    #[arg(long, short)]
+    pub show_serial_number: bool,
+
+    /// Select particular serial number.
+    #[arg(long, value_delimiter = ',')]
+    pub select: Option<Vec<String>>,
+}
+
+struct DeviceFilterer<'a, T: AsRef<str>> {
+    serial_numbers: Option<&'a [T]>,
+}
+impl<'a, T: AsRef<str>> DeviceFilterer<'a, T> {
+    fn predicate(&self, device: &DeviceInfo) -> bool {
+        let is_dualsense = device.vendor_id() == VENDOR_ID && device.product_id() == PRODUCT_ID;
+        if !is_dualsense {
+            return false;
+        }
+        match (self.serial_numbers, device.serial_number()) {
+            (Some(sn_list), Some(dev_sn)) => sn_list.iter().any(|x| x.as_ref() == dev_sn),
+            (Some(_sn_list), None) => false,
+            (None, _) => is_dualsense,
+        }
+    }
+}
 
 fn main() -> Result<(), anyhow::Error> {
+    let cli = Cli::parse();
     let api = HidApi::new()?;
+    let device_filterer = DeviceFilterer {
+        serial_numbers: cli.select.as_deref(),
+    };
 
     for (i, device) in api
         .device_list()
-        .filter(|dev| dev.vendor_id() == VENDOR_ID && dev.product_id() == PRODUCT_ID)
+        .filter(|dev| device_filterer.predicate(dev))
         .enumerate()
     {
-        println!(
-            "Dualsense {} (S/N {}):",
-            i + 1,
-            device.serial_number().unwrap_or("N/A")
-        );
-        let open_device = device
-            .open_device(&api)
-            .or_else(|_e| bail!("Could not find dualsense"))?;
-
-        let mut buf = [0u8; 64];
-        buf[0] = 0x05;
-        open_device.get_feature_report(&mut buf[..])?;
-
-        let mut buf = [0u8; 100];
-        let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
-        if buf[0] != 0x31 {
-            bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
-        }
-        let conn_type = ConnType::try_from(bytes_read)?;
-        let report = match conn_type {
-            ConnType::Bluetooth => &buf[2..],
-            ConnType::Usb => &buf[1..],
-        };
-
-        let battery_0 = report[52];
-        let battery_1 = report[53];
-        let plug_state: PlugState = battery_1.into();
-
-        let battery_level_raw = min(8, battery_0 & 0x0f);
-
-        let batt_level = battery_level_raw as f64 / 8.0f64;
-        let battery_status: BatteryState = ((battery_0 & 0xF0) >> 4).into();
-
-        println!("Battery Level: {}%", batt_level * 100.0);
-        println!("Battery Status {}", battery_status);
-        println!("Plug Status: {}", plug_state);
+        print_ds_info(i + 1, &api, device, cli.show_serial_number)?;
     }
     Ok(())
 }

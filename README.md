@@ -2,7 +2,15 @@
 
 Simple command line utility to get the battery status of a DualSense Controller.
 
-Currently only works when connected via Bluetooth.
+```text
+Usage: ps5-battery.exe [OPTIONS]
+
+Options:
+  -s, --show-serial-number  Show serial number for controllers
+      --select <SELECT>     Select particular serial number
+  -h, --help                Print help
+  -V, --version             Print version
+```
 
 ## References
 
