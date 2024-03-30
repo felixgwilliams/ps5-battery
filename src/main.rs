@@ -120,20 +120,23 @@ impl TryFrom<usize> for ConnType {
         }
     }
 }
-fn print_ds_info<T: Display>(
+fn print_ds_info<T: Display, W: std::fmt::Write>(
+    str_buf: &mut W,
     id: T,
     api: &HidApi,
     device: &DeviceInfo,
     show_serial_number: bool,
 ) -> Result<(), anyhow::Error> {
     if show_serial_number {
-        println!(
+        write!(
+            str_buf,
             "Dualsense {} (S/N {}):",
             id,
             device.serial_number().unwrap_or("N/A")
-        );
+        )
+        .unwrap();
     } else {
-        println!("Dualsense {}:", id,);
+        write!(str_buf, "Dualsense {}:", id,).unwrap();
     }
     let open_device = device
         .open_device(api)
@@ -163,9 +166,9 @@ fn print_ds_info<T: Display>(
     let batt_level = battery_level_raw as f64 / 8.0f64;
     let battery_status: BatteryState = ((battery_0 & 0xF0) >> 4).into();
 
-    println!("Battery Level: {}%", batt_level * 100.0);
-    println!("Battery Status {}", battery_status);
-    println!("Plug Status: {}", plug_state);
+    write!(str_buf, "Battery Level: {}%", batt_level * 100.0).unwrap();
+    write!(str_buf, "Battery Status {}", battery_status).unwrap();
+    write!(str_buf, "Plug Status: {}", plug_state).unwrap();
     Ok(())
 }
 
@@ -198,19 +201,30 @@ impl<'a, T: AsRef<str>> DeviceFilterer<'a, T> {
     }
 }
 
+fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
+    buf: &mut W,
+    api: &HidApi,
+    device_filterer: &DeviceFilterer<T>,
+    show_serial_number: bool,
+) -> Result<(), anyhow::Error> {
+    for (i, device) in api
+        .device_list()
+        .filter(|dev| device_filterer.predicate(dev))
+        .enumerate()
+    {
+        print_ds_info(buf, i + 1, api, device, show_serial_number)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
     let api = HidApi::new()?;
     let device_filterer = DeviceFilterer {
         serial_numbers: cli.select.as_deref(),
     };
-
-    for (i, device) in api
-        .device_list()
-        .filter(|dev| device_filterer.predicate(dev))
-        .enumerate()
-    {
-        print_ds_info(i + 1, &api, device, cli.show_serial_number)?;
-    }
+    let mut buf = String::new();
+    print_all_ds_info(&mut buf, &api, &device_filterer, cli.show_serial_number)?;
+    println!("{}", buf);
     Ok(())
 }
