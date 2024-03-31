@@ -3,7 +3,7 @@ use anyhow::bail;
 use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
 use iced::widget::{button, checkbox, column, container, row, text};
-use iced::{window, Element, Length, Sandbox, Settings, Size};
+use iced::{window, Element, Font, Length, Sandbox, Settings, Size};
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -283,7 +283,7 @@ impl Sandbox for StatusText {
     }
     fn view(&self) -> Element<Message> {
         let stuff = column![
-            text(&self.text),
+            text(&self.text).font(Font::MONOSPACE),
             row![
                 button(BUTTON_UPDATE)
                     .on_press(Message::GetStatus)
@@ -291,6 +291,7 @@ impl Sandbox for StatusText {
                 button(BUTTON_CLEAR).on_press(Message::Clear).padding(10),
                 checkbox(CHECK_SHOW_SN, self.show_sn).on_toggle(Message::SNToggled)
             ]
+            .spacing(20)
         ]
         .spacing(20);
         container(stuff)
@@ -298,14 +299,14 @@ impl Sandbox for StatusText {
             .height(Length::Fill)
             .center_x()
             .center_y()
-            .padding(20)
+            // .padding(20)
             .into()
     }
 }
 fn main() -> iced::Result {
     StatusText::run(Settings {
         window: window::Settings {
-            size: Size::new(300.0, 200.0),
+            size: Size::new(400.0, 225.0),
             ..window::Settings::default()
         },
         ..Settings::default()
