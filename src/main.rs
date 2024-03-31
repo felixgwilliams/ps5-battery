@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 use anyhow::bail;
 use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
