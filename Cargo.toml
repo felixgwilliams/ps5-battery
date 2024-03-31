@@ -9,3 +9,5 @@ edition = "2021"
 anyhow = "1.0.81"
 clap = { version = "4.5.4", features = ["derive"] }
 hidapi = { version = "2.6.1", features = [] }
+iced = "0.12.1"
+iced_runtime = "0.12.1"

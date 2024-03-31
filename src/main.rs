@@ -1,6 +1,8 @@
 use anyhow::bail;
 use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
+use iced::widget::{button, column, container, row, text};
+use iced::{window, Element, Length, Sandbox, Settings, Size};
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -128,7 +130,7 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     show_serial_number: bool,
 ) -> Result<(), anyhow::Error> {
     if show_serial_number {
-        write!(
+        writeln!(
             str_buf,
             "Dualsense {} (S/N {}):",
             id,
@@ -136,7 +138,7 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
         )
         .unwrap();
     } else {
-        write!(str_buf, "Dualsense {}:", id,).unwrap();
+        writeln!(str_buf, "Dualsense {}:", id,).unwrap();
     }
     let open_device = device
         .open_device(api)
@@ -149,7 +151,9 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     let mut buf = [0u8; 100];
     let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
     if buf[0] != 0x31 {
-        bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
+        // bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
+        writeln!(str_buf, "Please try again").unwrap();
+        return Ok(());
     }
     let conn_type = ConnType::try_from(bytes_read)?;
     let report = match conn_type {
@@ -166,9 +170,9 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     let batt_level = battery_level_raw as f64 / 8.0f64;
     let battery_status: BatteryState = ((battery_0 & 0xF0) >> 4).into();
 
-    write!(str_buf, "Battery Level: {}%", batt_level * 100.0).unwrap();
-    write!(str_buf, "Battery Status {}", battery_status).unwrap();
-    write!(str_buf, "Plug Status: {}", plug_state).unwrap();
+    writeln!(str_buf, "Battery Level: {}%", batt_level * 100.0).unwrap();
+    writeln!(str_buf, "Battery Status {}", battery_status).unwrap();
+    writeln!(str_buf, "Plug Status: {}", plug_state).unwrap();
     Ok(())
 }
 
@@ -217,14 +221,75 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
     Ok(())
 }
 
-fn main() -> Result<(), anyhow::Error> {
-    let cli = Cli::parse();
-    let api = HidApi::new()?;
-    let device_filterer = DeviceFilterer {
-        serial_numbers: cli.select.as_deref(),
-    };
-    let mut buf = String::new();
-    print_all_ds_info(&mut buf, &api, &device_filterer, cli.show_serial_number)?;
-    println!("{}", buf);
-    Ok(())
+// fn main() -> Result<(), anyhow::Error> {
+//     let cli = Cli::parse();
+//     let api = HidApi::new()?;
+//     let device_filterer = DeviceFilterer {
+//         serial_numbers: cli.select.as_deref(),
+//     };
+//     let mut buf = String::new();
+//     print_all_ds_info(&mut buf, &api, &device_filterer, cli.show_serial_number)?;
+//     println!("{}", buf);
+//     Ok(())
+// }
+
+struct StatusText {
+    text: String,
+}
+#[derive(Debug, Clone, Copy)]
+enum Message {
+    Clear,
+    GetStatus,
+}
+
+impl Sandbox for StatusText {
+    type Message = Message;
+    fn new() -> Self {
+        StatusText {
+            text: "".to_owned(),
+        }
+    }
+    fn title(&self) -> String {
+        String::from("PS5 battery - Iced")
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Clear => self.text.clear(),
+            Message::GetStatus => {
+                self.text.clear();
+                let api = HidApi::new().unwrap();
+                let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
+                    serial_numbers: None,
+                };
+                print_all_ds_info(&mut self.text, &api, &device_filterer, false).unwrap()
+            }
+        }
+    }
+    fn view(&self) -> Element<Message> {
+        let stuff = column![
+            text(&self.text),
+            row![
+                button("update").on_press(Message::GetStatus).padding(10),
+                button("clear").on_press(Message::Clear).padding(10),
+            ]
+        ]
+        .spacing(20);
+        container(stuff)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .padding(20)
+            .into()
+    }
+}
+fn main() -> iced::Result {
+    StatusText::run(Settings {
+        window: window::Settings {
+            size: Size::new(300.0, 300.0),
+            ..window::Settings::default()
+        },
+        ..Settings::default()
+    })
 }
