@@ -2,7 +2,7 @@
 use anyhow::bail;
 use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, checkbox, column, container, row, text};
 use iced::{window, Element, Length, Sandbox, Settings, Size};
 use std::{
     cmp::min,
@@ -13,6 +13,11 @@ const VENDOR_ID: u16 = 0x054c;
 const PRODUCT_ID: u16 = 0x0ce6;
 const USB_LEN: usize = 64;
 const BT_LEN: usize = 78;
+const SHOW_SN_DEFAULT: bool = false;
+
+static BUTTON_UPDATE: &str = "Update";
+static BUTTON_CLEAR: &str = "Clear";
+static CHECK_SHOW_SN: &str = "Show S/N";
 
 #[derive(Debug)]
 enum BatteryState {
@@ -153,7 +158,7 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
     if buf[0] != 0x31 {
         // bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
-        writeln!(str_buf, "Please try again").unwrap();
+        writeln!(str_buf, "Please press {BUTTON_UPDATE} again.").unwrap();
         return Ok(());
     }
     let conn_type = ConnType::try_from(bytes_read)?;
@@ -212,12 +217,17 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
     device_filterer: &DeviceFilterer<T>,
     show_serial_number: bool,
 ) -> Result<(), anyhow::Error> {
+    let mut device_found = false;
     for (i, device) in api
         .device_list()
         .filter(|dev| device_filterer.predicate(dev))
         .enumerate()
     {
+        device_found = true;
         print_ds_info(buf, i + 1, api, device, show_serial_number)?;
+    }
+    if !device_found {
+        writeln!(buf, "No Dualsenses Found").unwrap();
     }
     Ok(())
 }
@@ -236,11 +246,13 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
 
 struct StatusText {
     text: String,
+    show_sn: bool,
 }
 #[derive(Debug, Clone, Copy)]
 enum Message {
     Clear,
     GetStatus,
+    SNToggled(bool),
 }
 
 impl Sandbox for StatusText {
@@ -248,10 +260,11 @@ impl Sandbox for StatusText {
     fn new() -> Self {
         StatusText {
             text: "".to_owned(),
+            show_sn: SHOW_SN_DEFAULT,
         }
     }
     fn title(&self) -> String {
-        String::from("PS5 battery - Iced")
+        String::from("PS5 battery")
     }
 
     fn update(&mut self, message: Message) {
@@ -263,16 +276,20 @@ impl Sandbox for StatusText {
                 let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
                     serial_numbers: None,
                 };
-                print_all_ds_info(&mut self.text, &api, &device_filterer, false).unwrap()
+                print_all_ds_info(&mut self.text, &api, &device_filterer, self.show_sn).unwrap()
             }
+            Message::SNToggled(show_sn) => self.show_sn = show_sn,
         }
     }
     fn view(&self) -> Element<Message> {
         let stuff = column![
             text(&self.text),
             row![
-                button("update").on_press(Message::GetStatus).padding(10),
-                button("clear").on_press(Message::Clear).padding(10),
+                button(BUTTON_UPDATE)
+                    .on_press(Message::GetStatus)
+                    .padding(10),
+                button(BUTTON_CLEAR).on_press(Message::Clear).padding(10),
+                checkbox(CHECK_SHOW_SN, self.show_sn).on_toggle(Message::SNToggled)
             ]
         ]
         .spacing(20);
@@ -288,7 +305,7 @@ impl Sandbox for StatusText {
 fn main() -> iced::Result {
     StatusText::run(Settings {
         window: window::Settings {
-            size: Size::new(300.0, 300.0),
+            size: Size::new(300.0, 200.0),
             ..window::Settings::default()
         },
         ..Settings::default()
