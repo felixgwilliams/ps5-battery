@@ -4,6 +4,7 @@ use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
 use iced::widget::{button, checkbox, column, container, row, text};
 use iced::{window, Element, Font, Length, Sandbox, Settings, Size};
+use std::collections::HashSet;
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -150,10 +151,6 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
         .open_device(api)
         .or_else(|_e| bail!("Could not find dualsense"))?;
 
-    let mut buf = [0u8; 64];
-    buf[0] = 0x05;
-    open_device.get_feature_report(&mut buf[..])?;
-
     let mut buf = [0u8; 100];
     let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
     if buf[0] != 0x31 {
@@ -216,6 +213,7 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
     api: &HidApi,
     device_filterer: &DeviceFilterer<T>,
     show_serial_number: bool,
+    init_sns: &HashSet<String>,
 ) -> Result<(), anyhow::Error> {
     let mut device_found = false;
     for (i, device) in api
@@ -224,6 +222,12 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
         .enumerate()
     {
         device_found = true;
+        if !device
+            .serial_number()
+            .is_some_and(|sn| init_sns.contains(sn))
+        {
+            init_device(api, device)?;
+        }
         print_ds_info(buf, i + 1, api, device, show_serial_number)?;
     }
     if !device_found {
@@ -244,9 +248,10 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
 //     Ok(())
 // }
 
-struct StatusText {
+struct DualSenseStatus {
     text: String,
     show_sn: bool,
+    init_sns: HashSet<String>,
 }
 #[derive(Debug, Clone, Copy)]
 enum Message {
@@ -255,12 +260,27 @@ enum Message {
     SNToggled(bool),
 }
 
-impl Sandbox for StatusText {
+impl Sandbox for DualSenseStatus {
     type Message = Message;
     fn new() -> Self {
-        StatusText {
+        let mut init_sns = HashSet::new();
+        let api = HidApi::new().unwrap();
+        let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
+            serial_numbers: None,
+        };
+        for device in api
+            .device_list()
+            .filter(|dev| device_filterer.predicate(dev))
+        {
+            init_device(&api, device).expect("Could not init device.");
+            if let Some(sn) = device.serial_number() {
+                init_sns.insert(sn.to_owned());
+            }
+        }
+        DualSenseStatus {
             text: "".to_owned(),
             show_sn: SHOW_SN_DEFAULT,
+            init_sns,
         }
     }
     fn title(&self) -> String {
@@ -276,7 +296,14 @@ impl Sandbox for StatusText {
                 let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
                     serial_numbers: None,
                 };
-                print_all_ds_info(&mut self.text, &api, &device_filterer, self.show_sn).unwrap()
+                print_all_ds_info(
+                    &mut self.text,
+                    &api,
+                    &device_filterer,
+                    self.show_sn,
+                    &self.init_sns,
+                )
+                .unwrap()
             }
             Message::SNToggled(show_sn) => self.show_sn = show_sn,
         }
@@ -303,8 +330,20 @@ impl Sandbox for StatusText {
             .into()
     }
 }
+
+fn init_device(api: &HidApi, device: &DeviceInfo) -> anyhow::Result<()> {
+    let open_device = device
+        .open_device(api)
+        .or_else(|_e| bail!("Could not find dualsense"))?;
+
+    let mut buf = [0u8; 64];
+    buf[0] = 0x05;
+    open_device.get_feature_report(&mut buf[..])?;
+
+    Ok(())
+}
 fn main() -> iced::Result {
-    StatusText::run(Settings {
+    DualSenseStatus::run(Settings {
         window: window::Settings {
             size: Size::new(400.0, 225.0),
             ..window::Settings::default()
