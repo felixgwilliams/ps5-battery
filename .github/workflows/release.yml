@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check_tag:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get package version
+        id: cargo-get
+        uses: nicolaiunrein/cargo-get@v1.1.0
+        with:
+          subcommand: package.version --pretty
+      - name: check matches
+        run: |
+          if [ "${{ steps.cargo-get.outputs.metadata }}" != "${{ inputs.tag }}" ]; then
+            echo "package version ${{ steps.cargo-get.outputs.metadata }} does not match tag ${{ inputs.tag }}" >&2
+            exit 1;
+          else
+            echo "Releasing ${{ inputs.tag }}"
+          fi
+  windows:
+    runs-on: windows-latest
+    env:
+      TARGET_DIR: ./target
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cargo build -r --target ${{ env.TARGET }}
+          bin=target/${{ env.TARGET }}/release/ps5-battery.exe
+          echo "BIN=$bin" >> "$GITHUB_ENV"
+      - run: |
+          sha256sum $bin > $bin.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ env.TARGET }}
+          path: |
+            ${{ env.BIN }}
+            ${{ env.BIN }}.sha256
+  release_github:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [check_tag, windows]
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: binaries
+      - run: |
+          gh release create ${{ inputs.tag }} --generate-notes -d wheels/* binaries/*
