@@ -36,11 +36,13 @@ jobs:
       TARGET: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - shell: bash
+        run: |
           cargo build -r --target ${{ env.TARGET }}
           bin=target/${{ env.TARGET }}/release/ps5-battery.exe
           echo "BIN=$bin" >> "$GITHUB_ENV"
-      - run: |
+      - shell: bash
+        run: |
           sha256sum $bin > $bin.sha256
       - uses: actions/upload-artifact@v4
         with:
