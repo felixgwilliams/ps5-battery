@@ -36,6 +36,7 @@ jobs:
       TARGET: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
+      - uses: swatinem/rust-cache@v2
       - shell: bash
         run: |
           cargo build -r --target ${{ env.TARGET }}
