@@ -41,15 +41,16 @@ jobs:
           cargo build -r --target ${{ env.TARGET }}
           bin=target/${{ env.TARGET }}/release/ps5-battery.exe
           echo "BIN=$bin" >> "$GITHUB_ENV"
-      - shell: bash
-        run: |
-          sha256sum $bin > $bin.sha256
+          ARCHIVE_FILE=ps5-battery-${{ env.TARGET }}-${{ inputs.tag }}.zip
+          7z a $ARCHIVE_FILE ./$bin
+          sha256sum $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
+          echo "ARCHIVE_FILE=$ARCHIVE_FILE" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ env.TARGET }}
           path: |
-            ${{ env.BIN }}
-            ${{ env.BIN }}.sha256
+            *.zip
+            *.sha256
   release_github:
     name: Release
     runs-on: ubuntu-latest
@@ -66,4 +67,4 @@ jobs:
           merge-multiple: true
           path: binaries
       - run: |
-          gh release create ${{ inputs.tag }} --generate-notes -d wheels/* binaries/*
+          gh release create ${{ inputs.tag }} --generate-notes -d binaries/*
