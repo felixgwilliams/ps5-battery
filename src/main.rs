@@ -1,9 +1,8 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(feature = "gui", windows_subsystem = "windows")]
 use anyhow::bail;
 use clap::{command, Parser};
 use hidapi::{DeviceInfo, HidApi};
-use iced::widget::{button, checkbox, column, container, row, text};
-use iced::{window, Element, Font, Length, Sandbox, Settings, Size};
+
 use std::collections::HashSet;
 use std::{
     cmp::min,
@@ -14,11 +13,8 @@ const VENDOR_ID: u16 = 0x054c;
 const PRODUCT_ID: u16 = 0x0ce6;
 const USB_LEN: usize = 64;
 const BT_LEN: usize = 78;
-const SHOW_SN_DEFAULT: bool = false;
 
 static BUTTON_UPDATE: &str = "Update";
-static BUTTON_CLEAR: &str = "Clear";
-static CHECK_SHOW_SN: &str = "Show S/N";
 
 #[derive(Debug)]
 enum BatteryState {
@@ -29,6 +25,109 @@ enum BatteryState {
     AbnormalVoltage,
     AbnormalTemp,
     Unknown,
+}
+
+#[cfg(feature = "gui")]
+mod gui {
+    use super::*;
+    use iced::widget::{button, checkbox, column, container, row, text};
+    use iced::{window, Element, Font, Length, Sandbox, Settings, Size};
+    static BUTTON_CLEAR: &str = "Clear";
+    static CHECK_SHOW_SN: &str = "Show BT S/N";
+    const SHOW_SN_DEFAULT: bool = false;
+    #[cfg(feature = "gui")]
+    struct DualSenseStatus {
+        text: String,
+        show_sn: bool,
+        init_sns: HashSet<String>,
+    }
+    #[cfg(feature = "gui")]
+    #[derive(Debug, Clone, Copy)]
+    enum Message {
+        Clear,
+        GetStatus,
+        SNToggled(bool),
+    }
+    #[cfg(feature = "gui")]
+    impl Sandbox for DualSenseStatus {
+        type Message = Message;
+        fn new() -> Self {
+            let mut init_sns = HashSet::new();
+            let api = HidApi::new().unwrap();
+            let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
+                serial_numbers: None,
+            };
+            for device in api
+                .device_list()
+                .filter(|dev| device_filterer.predicate(dev))
+            {
+                init_device(&api, device).expect("Could not init device.");
+                if let Some(sn) = device.serial_number() {
+                    init_sns.insert(sn.to_owned());
+                }
+            }
+            DualSenseStatus {
+                text: "".to_owned(),
+                show_sn: SHOW_SN_DEFAULT,
+                init_sns,
+            }
+        }
+        fn title(&self) -> String {
+            String::from("PS5 battery")
+        }
+
+        fn update(&mut self, message: Message) {
+            match message {
+                Message::Clear => self.text.clear(),
+                Message::GetStatus => {
+                    self.text.clear();
+                    let api = HidApi::new().unwrap();
+                    let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
+                        serial_numbers: None,
+                    };
+                    print_all_ds_info(
+                        &mut self.text,
+                        &api,
+                        &device_filterer,
+                        self.show_sn,
+                        &self.init_sns,
+                    )
+                    .unwrap()
+                }
+                Message::SNToggled(show_sn) => self.show_sn = show_sn,
+            }
+        }
+        fn view(&self) -> Element<Message> {
+            let stuff = column![
+                text(&self.text).font(Font::MONOSPACE),
+                row![
+                    button(BUTTON_UPDATE)
+                        .on_press(Message::GetStatus)
+                        .padding(10),
+                    button(BUTTON_CLEAR).on_press(Message::Clear).padding(10),
+                    checkbox(CHECK_SHOW_SN, self.show_sn).on_toggle(Message::SNToggled)
+                ]
+                .spacing(20)
+            ]
+            .spacing(20);
+            container(stuff)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x()
+                .center_y()
+                // .padding(20)
+                .into()
+        }
+    }
+    pub fn main() -> iced::Result {
+        DualSenseStatus::run(Settings {
+            window: window::Settings {
+                size: Size::new(400.0, 225.0),
+                ..window::Settings::default()
+            },
+            ..Settings::default()
+        })
+    }
 }
 
 impl From<u8> for BatteryState {
@@ -112,6 +211,7 @@ impl Display for PlugState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum ConnType {
     Bluetooth,
     Usb,
@@ -136,7 +236,28 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     device: &DeviceInfo,
     show_serial_number: bool,
 ) -> Result<(), anyhow::Error> {
-    if show_serial_number {
+    let open_device = device
+        .open_device(api)
+        .or_else(|_e| bail!("Could not find dualsense"))?;
+
+    let mut buf = [0u8; 100];
+    let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
+    let conn_type = ConnType::try_from(bytes_read)?;
+    let report = match conn_type {
+        ConnType::Bluetooth => &buf[2..],
+        ConnType::Usb => &buf[1..],
+    };
+    #[cfg(not(feature = "gui"))]
+    {
+        println!("Bytes read: {}", bytes_read);
+        println!("{:02x?}", buf);
+    }
+    if conn_type == ConnType::Bluetooth && buf[0] != 0x31 {
+        // bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
+        writeln!(str_buf, "Please press {BUTTON_UPDATE} again.").unwrap();
+        return Ok(());
+    }
+    if show_serial_number && conn_type == ConnType::Bluetooth {
         writeln!(
             str_buf,
             "Dualsense {} (S/N {}):",
@@ -147,22 +268,6 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     } else {
         writeln!(str_buf, "Dualsense {}:", id,).unwrap();
     }
-    let open_device = device
-        .open_device(api)
-        .or_else(|_e| bail!("Could not find dualsense"))?;
-
-    let mut buf = [0u8; 100];
-    let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
-    if buf[0] != 0x31 {
-        // bail!("Unknown Report ID {:02x}, must be 0x31", buf[0])
-        writeln!(str_buf, "Please press {BUTTON_UPDATE} again.").unwrap();
-        return Ok(());
-    }
-    let conn_type = ConnType::try_from(bytes_read)?;
-    let report = match conn_type {
-        ConnType::Bluetooth => &buf[2..],
-        ConnType::Usb => &buf[1..],
-    };
 
     let battery_0 = report[52];
     let battery_1 = report[53];
@@ -236,99 +341,23 @@ fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
     Ok(())
 }
 
-// fn main() -> Result<(), anyhow::Error> {
-//     let cli = Cli::parse();
-//     let api = HidApi::new()?;
-//     let device_filterer = DeviceFilterer {
-//         serial_numbers: cli.select.as_deref(),
-//     };
-//     let mut buf = String::new();
-//     print_all_ds_info(&mut buf, &api, &device_filterer, cli.show_serial_number)?;
-//     println!("{}", buf);
-//     Ok(())
-// }
-
-struct DualSenseStatus {
-    text: String,
-    show_sn: bool,
-    init_sns: HashSet<String>,
-}
-#[derive(Debug, Clone, Copy)]
-enum Message {
-    Clear,
-    GetStatus,
-    SNToggled(bool),
-}
-
-impl Sandbox for DualSenseStatus {
-    type Message = Message;
-    fn new() -> Self {
-        let mut init_sns = HashSet::new();
-        let api = HidApi::new().unwrap();
-        let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
-            serial_numbers: None,
-        };
-        for device in api
-            .device_list()
-            .filter(|dev| device_filterer.predicate(dev))
-        {
-            init_device(&api, device).expect("Could not init device.");
-            if let Some(sn) = device.serial_number() {
-                init_sns.insert(sn.to_owned());
-            }
-        }
-        DualSenseStatus {
-            text: "".to_owned(),
-            show_sn: SHOW_SN_DEFAULT,
-            init_sns,
-        }
-    }
-    fn title(&self) -> String {
-        String::from("PS5 battery")
-    }
-
-    fn update(&mut self, message: Message) {
-        match message {
-            Message::Clear => self.text.clear(),
-            Message::GetStatus => {
-                self.text.clear();
-                let api = HidApi::new().unwrap();
-                let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
-                    serial_numbers: None,
-                };
-                print_all_ds_info(
-                    &mut self.text,
-                    &api,
-                    &device_filterer,
-                    self.show_sn,
-                    &self.init_sns,
-                )
-                .unwrap()
-            }
-            Message::SNToggled(show_sn) => self.show_sn = show_sn,
-        }
-    }
-    fn view(&self) -> Element<Message> {
-        let stuff = column![
-            text(&self.text).font(Font::MONOSPACE),
-            row![
-                button(BUTTON_UPDATE)
-                    .on_press(Message::GetStatus)
-                    .padding(10),
-                button(BUTTON_CLEAR).on_press(Message::Clear).padding(10),
-                checkbox(CHECK_SHOW_SN, self.show_sn).on_toggle(Message::SNToggled)
-            ]
-            .spacing(20)
-        ]
-        .spacing(20);
-        container(stuff)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            // .padding(20)
-            .into()
-    }
+#[cfg(not(feature = "gui"))]
+fn main() -> Result<(), anyhow::Error> {
+    let cli = Cli::parse();
+    let api = HidApi::new()?;
+    let device_filterer = DeviceFilterer {
+        serial_numbers: cli.select.as_deref(),
+    };
+    let mut buf = String::new();
+    print_all_ds_info(
+        &mut buf,
+        &api,
+        &device_filterer,
+        cli.show_serial_number,
+        &HashSet::new(),
+    )?;
+    println!("{}", buf);
+    Ok(())
 }
 
 fn init_device(api: &HidApi, device: &DeviceInfo) -> anyhow::Result<()> {
@@ -342,12 +371,7 @@ fn init_device(api: &HidApi, device: &DeviceInfo) -> anyhow::Result<()> {
 
     Ok(())
 }
+#[cfg(feature = "gui")]
 fn main() -> iced::Result {
-    DualSenseStatus::run(Settings {
-        window: window::Settings {
-            size: Size::new(400.0, 225.0),
-            ..window::Settings::default()
-        },
-        ..Settings::default()
-    })
+    gui::main()
 }
