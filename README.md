@@ -1,19 +1,10 @@
 # PS5 Battery
 
-Simple command line utility to get the battery status of a DualSense Controller.
-
-```text
-Usage: ps5-battery.exe [OPTIONS]
-
-Options:
-  -s, --show-serial-number  Show serial number for controllers
-      --select <SELECT>     Select particular serial number
-  -h, --help                Print help
-  -V, --version             Print version
-```
+Simple GUI to query DualSense Battery Status
 
 ## References
 
+- [iced-rs (MIT)](https://iced.rs/)
 - [DS4Windows (MIT)](https://github.com/ds4windowsapp/DS4Windows/blob/jay/DS4Windows/DS4Library/InputDevices/DualSenseDevice.cs)
 - [Sony DualSense - Game Controller Collective Wiki](https://controllers.fandom.com/wiki/Sony_DualSense)
 - [pydualsense (MIT)](https://github.com/flok/pydualsense)
