@@ -35,6 +35,7 @@ mod gui {
     static BUTTON_CLEAR: &str = "Clear";
     static CHECK_SHOW_SN: &str = "Show BT S/N";
     const SHOW_SN_DEFAULT: bool = false;
+    pub const ICON: &[u8] = include_bytes!("../assets/icon.ico");
     #[cfg(feature = "gui")]
     struct DualSenseStatus {
         text: String,
@@ -123,6 +124,7 @@ mod gui {
         DualSenseStatus::run(Settings {
             window: window::Settings {
                 size: Size::new(400.0, 225.0),
+                icon: iced::window::icon::from_file_data(ICON, Some(image::ImageFormat::Ico)).ok(),
                 ..window::Settings::default()
             },
             ..Settings::default()
