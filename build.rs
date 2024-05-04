@@ -3,6 +3,7 @@
 #[cfg(feature = "gui")]
 fn main() -> std::io::Result<()> {
     use std::io::{BufWriter, Write};
+    println!("cargo:rerun-if-changed=assets");
 
     let icon_png = image::io::Reader::open("assets/app-icon-128.png")?
         .decode()
