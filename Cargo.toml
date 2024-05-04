@@ -1,6 +1,6 @@
 [package]
 name = "ps5-battery"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,8 +9,7 @@ edition = "2021"
 anyhow = "1.0.82"
 clap = { version = "4.5.4", features = ["derive"] }
 hidapi = { version = "2.6.1", features = [] }
-iced = {version = "0.12.1", default-features = false, features = ["fira-sans", "image"], optional=true}
-image = {version = "0.24.9", default-features = false, features = ["ico"], optional=true}
+iced = {version = "0.12.1", default-features = false, features = ["fira-sans"], optional=true}
 
 [features]
 gui = ["iced", "image", "winres"]
@@ -18,3 +17,4 @@ default = ["gui"]
 
 [build-dependencies]
 winres = {version = "0.1.12", optional = true}
+image = {version = "0.25.1", optional=true}
