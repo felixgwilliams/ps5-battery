@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.82"
-clap = { version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive"], optional = true}
 hidapi = { version = "2.6.1", features = [] }
 iced = { version = "0.12.1", default-features = false, features = [
     "fira-sans",
@@ -15,6 +15,7 @@ iced = { version = "0.12.1", default-features = false, features = [
 
 [features]
 gui = ["iced", "image", "winres"]
+cli = ["clap"]
 default = ["gui"]
 
 [build-dependencies]
