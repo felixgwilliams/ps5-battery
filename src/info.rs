@@ -1,5 +1,4 @@
-use crate::controllers::{read_controller, ConnType, Controller, DeviceFilterer, TypedDevice};
-use anyhow::bail;
+use crate::controllers::{ConnType, Controller, DeviceFilterer, TypedDevice};
 use hidapi::HidApi;
 use std::{collections::HashSet, fmt::Display};
 pub static BUTTON_UPDATE: &str = "Update";
@@ -8,17 +7,10 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     str_buf: &mut W,
     id: T,
     api: &HidApi,
-    device: &TypedDevice,
+    device: &mut TypedDevice,
     show_serial_number: bool,
 ) -> Result<(), anyhow::Error> {
-    let open_device = device
-        .open_device(api)
-        .or_else(|_e| bail!("Could not find dualsense"))?;
-
-    let mut buf = [0u8; 100];
-    let bytes_read = open_device.read_timeout(&mut buf[..], 1000)?;
-
-    let controller = read_controller(buf, bytes_read, device.serial_number())?;
+    let controller = device.read_controller(api)?;
     if show_serial_number && controller.conn_type() == ConnType::Bluetooth {
         writeln!(
             str_buf,
@@ -64,7 +56,7 @@ pub fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
         {
             device.init_device(api)?;
         }
-        print_ds_info(buf, i + 1, api, &device, show_serial_number)?;
+        print_ds_info(buf, i + 1, api, &mut device, show_serial_number)?;
     }
     if !device_found {
         writeln!(buf, "No Dualsenses Found").unwrap();

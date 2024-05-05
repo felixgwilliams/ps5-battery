@@ -1,9 +1,8 @@
 use anyhow::bail;
-use hidapi::{DeviceInfo, HidApi, HidDevice, HidResult};
+use hidapi::{BusType, DeviceInfo, HidApi, HidDevice, HidResult};
 use std::{
     cmp::min,
     fmt::{Debug, Display},
-    ops::Deref,
 };
 
 const VENDOR_ID: u16 = 0x054c;
@@ -13,7 +12,7 @@ const PRODUCT_ID_DS4SLIM: u16 = 0x09CC;
 
 const USB_LEN: usize = 64;
 const BT_LEN: usize = 78;
-const BUF_SIZE: usize = 100;
+const BUF_SIZE: usize = 200;
 const REPORT_LEN: usize = 63;
 const BT_EXTRA_LEN: usize = 13;
 
@@ -32,6 +31,7 @@ pub struct DeviceFilterer<'a, T: AsRef<str>> {
     pub serial_numbers: Option<&'a [T]>,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ControllerType {
     DualSense,
     DualShock4,
@@ -41,10 +41,13 @@ pub struct TypedDevice<'a> {
     pub controller_type: ControllerType,
     device: &'a DeviceInfo,
     pub ready_state: ReadyState,
+    pub conn_type: ConnType,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ReadyState {
     Ready,
+    Pending,
     NotReady,
 }
 impl<'a> TypedDevice<'a> {
@@ -56,16 +59,61 @@ impl<'a> TypedDevice<'a> {
     }
 
     pub fn init_device(&mut self, api: &HidApi) -> anyhow::Result<()> {
+        let report_id: u8 = match self.controller_type {
+            ControllerType::DualSense => 0x05,
+            ControllerType::DualShock4 | ControllerType::DualShock4Slim => 0x05,
+        };
+        if self.ready_state == ReadyState::Ready {
+            return Ok(());
+        }
+        if self.conn_type == ConnType::Bluetooth {
+            let open_device = self
+                .open_device(api)
+                .or_else(|_e| bail!("Could not find dualsense"))?;
+
+            let mut buf = [0u8; 64];
+            buf[0] = report_id;
+            open_device.get_feature_report(&mut buf[..])?;
+            self.ready_state = ReadyState::Pending;
+        }
+        Ok(())
+    }
+    pub fn read_controller(&mut self, api: &HidApi) -> anyhow::Result<Controller> {
+        if !matches!(self.controller_type, ControllerType::DualSense) {
+            bail!("Only Dualsense is implemented");
+        }
+        if self.ready_state == ReadyState::NotReady {
+            self.init_device(api)?;
+        }
         let open_device = self
             .open_device(api)
             .or_else(|_e| bail!("Could not find dualsense"))?;
+        let mut raw_report = [0u8; BUF_SIZE];
+        let bytes_read = open_device.read_timeout(&mut raw_report[..], 1000)?;
+        let conn_type = ConnType::try_from(bytes_read)?;
 
-        let mut buf = [0u8; 64];
-        buf[0] = 0x05;
-        open_device.get_feature_report(&mut buf[..])?;
-        self.ready_state = ReadyState::Ready;
+        if let Some(report) = get_report(raw_report, conn_type)? {
+            self.ready_state = ReadyState::Ready;
+            let standard_report = report.get_standard_report();
+            let plug = read_plug_stage(standard_report[53]);
+            let battery = read_battery_state_dualsense(standard_report[52]);
 
-        Ok(())
+            Ok(Controller::Ready(ReadyController {
+                serial_number: self.serial_number().map(|x| x.to_owned()),
+                // report,
+                conn_type,
+                type_: self.controller_type,
+                plug,
+                battery,
+            }))
+        } else {
+            self.ready_state = ReadyState::NotReady;
+            Ok(Controller::NotReady(NotReadyController {
+                serial_number: self.serial_number().map(|x| x.to_owned()),
+                type_: self.controller_type,
+                conn_type,
+            }))
+        }
     }
 
     pub fn make_device(device: &'a DeviceInfo) -> Option<Self> {
@@ -75,11 +123,17 @@ impl<'a> TypedDevice<'a> {
             (VENDOR_ID, PRODUCT_ID_DS4SLIM) => ControllerType::DualShock4Slim,
             (_, _) => return None,
         };
+        let (conn_type, ready_state) = match device.bus_type() {
+            BusType::Bluetooth => (ConnType::Bluetooth, ReadyState::NotReady),
+            BusType::Usb => (ConnType::Usb, ReadyState::Ready),
+            _ => return None,
+        };
 
         Some(TypedDevice {
             controller_type,
             device,
-            ready_state: ReadyState::NotReady,
+            ready_state,
+            conn_type,
         })
     }
 }
@@ -116,7 +170,7 @@ pub struct Battery {
     pub level: u8,
 }
 
-pub fn read_battery_state(battery_byte: u8) -> Battery {
+pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
     let level_byte = battery_byte & 0x0F;
     let level = min(8, level_byte);
     let state_byte = battery_byte & 0xF0;
@@ -275,33 +329,4 @@ fn get_report(
         (ConnType::Bluetooth, _) => None,
         (ConnType::Usb, _) => Some(Report::DsUSB(raw_report[1..REPORT_LEN + 1].try_into()?)),
     })
-}
-
-pub fn read_controller<T: Deref<Target = str>>(
-    raw_report: [u8; BUF_SIZE],
-    bytes_read: usize,
-    serial_number: Option<T>,
-) -> Result<Controller, anyhow::Error> {
-    let conn_type = ConnType::try_from(bytes_read)?;
-
-    if let Some(report) = get_report(raw_report, conn_type)? {
-        let standard_report = report.get_standard_report();
-        let plug = read_plug_stage(standard_report[53]);
-        let battery = read_battery_state(standard_report[52]);
-
-        Ok(Controller::Ready(ReadyController {
-            serial_number: serial_number.map(|x| x.to_owned()),
-            // report,
-            conn_type,
-            type_: ControllerType::DualSense,
-            plug,
-            battery,
-        }))
-    } else {
-        Ok(Controller::NotReady(NotReadyController {
-            serial_number: serial_number.map(|x| x.to_owned()),
-            type_: ControllerType::DualSense,
-            conn_type,
-        }))
-    }
 }
