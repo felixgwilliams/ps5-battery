@@ -1,5 +1,5 @@
 use anyhow::bail;
-use hidapi::{DeviceInfo, HidApi};
+use hidapi::{DeviceInfo, HidApi, HidDevice, HidResult};
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -7,37 +7,95 @@ use std::{
 };
 
 const VENDOR_ID: u16 = 0x054c;
-const PRODUCT_ID: u16 = 0x0ce6;
+const PRODUCT_ID_DUALSENSE: u16 = 0x0ce6;
+const PRODUCT_ID_DS4: u16 = 0x05C4;
+const PRODUCT_ID_DS4SLIM: u16 = 0x09CC;
+
 const USB_LEN: usize = 64;
 const BT_LEN: usize = 78;
 const BUF_SIZE: usize = 100;
 const REPORT_LEN: usize = 63;
 const BT_EXTRA_LEN: usize = 13;
 
-pub fn init_device(api: &HidApi, device: &DeviceInfo) -> anyhow::Result<()> {
-    let open_device = device
-        .open_device(api)
-        .or_else(|_e| bail!("Could not find dualsense"))?;
+// pub fn init_device(api: &HidApi, device: &TypedDevice) -> anyhow::Result<()> {
+//     let open_device = device
+//         .open_device(api)
+//         .or_else(|_e| bail!("Could not find dualsense"))?;
 
-    let mut buf = [0u8; 64];
-    buf[0] = 0x05;
-    open_device.get_feature_report(&mut buf[..])?;
+//     let mut buf = [0u8; 64];
+//     buf[0] = 0x05;
+//     open_device.get_feature_report(&mut buf[..])?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 pub struct DeviceFilterer<'a, T: AsRef<str>> {
     pub serial_numbers: Option<&'a [T]>,
 }
+
+pub enum ControllerType {
+    DualSense,
+    DualShock4,
+    DualShock4Slim,
+}
+pub struct TypedDevice<'a> {
+    pub controller_type: ControllerType,
+    device: &'a DeviceInfo,
+    pub ready_state: ReadyState,
+}
+
+pub enum ReadyState {
+    Ready,
+    NotReady,
+}
+impl<'a> TypedDevice<'a> {
+    pub fn serial_number(&self) -> Option<&str> {
+        self.device.serial_number()
+    }
+    pub fn open_device(&self, hidapi: &HidApi) -> HidResult<HidDevice> {
+        self.device.open_device(hidapi)
+    }
+
+    pub fn init_device(&mut self, api: &HidApi) -> anyhow::Result<()> {
+        let open_device = self
+            .open_device(api)
+            .or_else(|_e| bail!("Could not find dualsense"))?;
+
+        let mut buf = [0u8; 64];
+        buf[0] = 0x05;
+        open_device.get_feature_report(&mut buf[..])?;
+        self.ready_state = ReadyState::Ready;
+
+        Ok(())
+    }
+
+    pub fn make_device(device: &'a DeviceInfo) -> Option<Self> {
+        let controller_type = match (device.vendor_id(), device.product_id()) {
+            (VENDOR_ID, PRODUCT_ID_DUALSENSE) => ControllerType::DualSense,
+            (VENDOR_ID, PRODUCT_ID_DS4) => ControllerType::DualShock4,
+            (VENDOR_ID, PRODUCT_ID_DS4SLIM) => ControllerType::DualShock4Slim,
+            (_, _) => return None,
+        };
+
+        Some(TypedDevice {
+            controller_type,
+            device,
+            ready_state: ReadyState::NotReady,
+        })
+    }
+}
+
 impl<'a, T: AsRef<str>> DeviceFilterer<'a, T> {
-    pub fn predicate(&self, device: &DeviceInfo) -> bool {
-        let is_dualsense = device.vendor_id() == VENDOR_ID && device.product_id() == PRODUCT_ID;
-        if !is_dualsense {
-            return false;
-        }
-        match (self.serial_numbers, device.serial_number()) {
-            (Some(sn_list), Some(dev_sn)) => sn_list.iter().any(|x| x.as_ref() == dev_sn),
-            (Some(_sn_list), None) => false,
-            (None, _) => is_dualsense,
+    pub fn predicate(&self, device: &'a DeviceInfo) -> Option<TypedDevice<'a>> {
+        let typed_device = TypedDevice::make_device(device)?;
+        let Some(sn_list) = self.serial_numbers else {
+            return Some(typed_device);
+        };
+        let dev_sn = typed_device.serial_number();
+
+        if sn_list.iter().any(|x| Some(x.as_ref()) == dev_sn) {
+            Some(typed_device)
+        } else {
+            None
         }
     }
 }
@@ -170,10 +228,6 @@ impl Report {
             Self::DsUSB(report) => report,
         }
     }
-}
-
-pub enum ControllerType {
-    DualSense,
 }
 
 pub struct ReadyController {

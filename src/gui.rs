@@ -1,5 +1,5 @@
 // use super::*;
-use crate::controllers::{init_device, DeviceFilterer};
+use crate::controllers::DeviceFilterer;
 use crate::info::{print_all_ds_info, BUTTON_UPDATE};
 
 use hidapi::HidApi;
@@ -32,11 +32,11 @@ impl Sandbox for DualSenseStatus {
         let device_filterer: DeviceFilterer<'_, &str> = DeviceFilterer {
             serial_numbers: None,
         };
-        for device in api
+        for mut device in api
             .device_list()
-            .filter(|dev| device_filterer.predicate(dev))
+            .filter_map(|dev| device_filterer.predicate(dev))
         {
-            init_device(&api, device).expect("Could not init device.");
+            device.init_device(&api).expect("Could not init device.");
             if let Some(sn) = device.serial_number() {
                 init_sns.insert(sn.to_owned());
             }
