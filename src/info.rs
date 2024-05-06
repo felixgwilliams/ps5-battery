@@ -29,9 +29,12 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
         return Ok(());
     };
 
-    let batt_level = status.battery.level;
-
-    writeln!(str_buf, "Battery Level: {:.00}%", batt_level * 100.0).unwrap();
+    writeln!(
+        str_buf,
+        "Battery Level: {:.00}%",
+        status.battery.percentage()
+    )
+    .unwrap();
     writeln!(str_buf, "Battery Status {}", status.battery.state).unwrap();
     writeln!(str_buf, "Plug Status: {}", status.plug).unwrap();
     Ok(())

@@ -1,9 +1,6 @@
 use anyhow::bail;
 use hidapi::{BusType, DeviceInfo, HidApi, HidDevice, HidResult};
-use std::{
-    cmp::min,
-    fmt::{Debug, Display},
-};
+use std::fmt::{Debug, Display};
 
 const VENDOR_ID: u16 = 0x054c;
 const PRODUCT_ID_DUALSENSE: u16 = 0x0ce6;
@@ -164,12 +161,20 @@ pub enum ChargeState {
 
 pub struct Battery {
     pub state: ChargeState,
-    pub level: f64,
+    pub level: u8,
+    pub max_level: u8,
 }
 
-pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
+impl Battery {
+    pub fn percentage(&self) -> f64 {
+        f64::from(self.level) / f64::from(self.max_level) * 100.0
+    }
+}
+
+pub const fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
     let level_byte = battery_byte & 0x0F;
-    let level = min(8, level_byte);
+    let level = if level_byte > 8 { 8 } else { level_byte };
+    // min(8, level_byte);
     let state_byte = (battery_byte & 0xF0) >> 4;
 
     let state = match state_byte {
@@ -183,20 +188,25 @@ pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
     };
     Battery {
         state,
-        level: f64::from(level) / 8.0f64,
+        level,
+        max_level: 8,
     }
 }
 
-pub fn read_battery_state_ds4(battery_byte: u8) -> Battery {
-    let level_byte = battery_byte & 0x0F;
+pub const fn read_battery_state_ds4(battery_byte: u8) -> Battery {
+    let level = battery_byte & 0x0F;
     let cable_state = (battery_byte >> 4) & 0x01;
-    let (state, level) = if cable_state == 0 {
-        (ChargeState::Discharging, f64::from(level_byte) / 8.0)
+    let (state, max_level) = if cable_state == 0 {
+        (ChargeState::Discharging, 8u8)
     } else {
-        (ChargeState::Charging, f64::from(level_byte) / 11.0)
+        (ChargeState::Charging, 11u8)
     };
 
-    Battery { state, level }
+    Battery {
+        state,
+        level,
+        max_level,
+    }
 }
 
 impl Display for ChargeState {
@@ -306,7 +316,7 @@ impl Report {
             }
         }
     }
-    fn get_battery(&self) -> Battery {
+    const fn get_battery(&self) -> Battery {
         match self {
             Self::DsUSB(ds_report) | Self::DsBluetooth(ds_report, _) => {
                 read_battery_state_dualsense(ds_report[52])
