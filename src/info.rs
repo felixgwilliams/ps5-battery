@@ -61,7 +61,7 @@ pub fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
         print_ds_info(buf, i + 1, api, &mut device, show_serial_number)?;
     }
     if !device_found {
-        writeln!(buf, "No Dualsenses Found").unwrap();
+        writeln!(buf, "No Gamepads Found").unwrap();
     }
     Ok(())
 }

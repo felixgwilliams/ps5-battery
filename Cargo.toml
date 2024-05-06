@@ -1,6 +1,6 @@
 [package]
 name = "ps5-battery"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "A utility for viewing the battery status of DualSense and DS4 Controllers"
 license = "MIT"
