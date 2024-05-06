@@ -16,7 +16,7 @@ const REPORT_LEN: usize = 63;
 const DS4_REPORT_LEN: usize = 33;
 const BT_EXTRA_LEN: usize = 13;
 
-const DS4_BT_OFFSET: usize = 4;
+const DS4_BT_OFFSET: usize = 3;
 const DS4_USB_OFFSET: usize = 1;
 const DS_BT_OFFSET: usize = 2;
 const DS_USB_OFFSET: usize = 1;
