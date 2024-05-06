@@ -36,7 +36,8 @@ pub enum ControllerType {
 impl ControllerType {
     pub fn name(self) -> String {
         match self {
-            Self::DualSense | Self::DualSenseEdge => "Dualsense".into(),
+            Self::DualSense => "Dualsense".into(),
+            Self::DualSenseEdge => "Dualsense Edge".into(),
             Self::DualShock4 | Self::DualShock4Slim => "DualShock 4".into(),
         }
     }
@@ -169,7 +170,7 @@ pub struct Battery {
 pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
     let level_byte = battery_byte & 0x0F;
     let level = min(8, level_byte);
-    let state_byte = battery_byte & 0xF0;
+    let state_byte = (battery_byte & 0xF0) >> 4;
 
     let state = match state_byte {
         0x0 => ChargeState::Discharging,
@@ -185,6 +186,7 @@ pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
         level: f64::from(level) / 8.0f64,
     }
 }
+
 pub fn read_battery_state_ds4(battery_byte: u8) -> Battery {
     let level_byte = battery_byte & 0x0F;
     let cable_state = (battery_byte >> 4) & 0x01;
@@ -215,7 +217,7 @@ pub struct PlugState {
     plugged_dock: bool,
 }
 
-pub const fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
+pub const fn read_plug_state_ds4(plug_byte: u8) -> PlugState {
     let usb_power = (plug_byte & 0x10) > 0;
     let headphones = (plug_byte & 0x20) > 0;
     let mic = (plug_byte & 0x40) > 0;
@@ -231,7 +233,7 @@ pub const fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
         plugged_dock: false,
     }
 }
-pub const fn read_plug_state_ds4(plug_byte: u8) -> PlugState {
+pub const fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
     let headphones = (plug_byte & 0x01) > 0;
     let mic = (plug_byte & 0x02) > 0;
     let muted = (plug_byte & 0x04) > 0;
@@ -285,11 +287,12 @@ pub enum ConnType {
     Usb,
 }
 
+#[derive(Debug)]
 pub enum Report {
     DsBluetooth([u8; REPORT_LEN], [u8; BT_EXTRA_LEN]),
     DsUSB([u8; REPORT_LEN]),
-    D4USB([u8; DS4_REPORT_LEN]),
     D4Bluetooth([u8; DS4_REPORT_LEN]),
+    D4USB([u8; DS4_REPORT_LEN]),
 }
 impl Report {
     const fn get_plug(&self) -> PlugState {
@@ -297,6 +300,7 @@ impl Report {
             Self::DsUSB(ds_report) | Self::DsBluetooth(ds_report, _) => {
                 read_plug_state_dualsense(ds_report[53])
             }
+
             Self::D4Bluetooth(d4_report) | Self::D4USB(d4_report) => {
                 read_plug_state_ds4(d4_report[29])
             }
@@ -307,6 +311,7 @@ impl Report {
             Self::DsUSB(ds_report) | Self::DsBluetooth(ds_report, _) => {
                 read_battery_state_dualsense(ds_report[52])
             }
+
             Self::D4Bluetooth(d4_report) | Self::D4USB(d4_report) => {
                 read_battery_state_ds4(d4_report[29])
             }
@@ -347,6 +352,7 @@ fn get_report(
                 )),
             })
         }
+
         ControllerType::DualShock4 | ControllerType::DualShock4Slim => {
             Ok(match (conn_type, raw_report[0]) {
                 (ConnType::Bluetooth, 0x01) => None,
