@@ -41,8 +41,8 @@ impl Sandbox for DualSenseStatus {
                 init_sns.insert(sn.to_owned());
             }
         }
-        DualSenseStatus {
-            text: "".to_owned(),
+        Self {
+            text: String::new(),
             show_sn: SHOW_SN_DEFAULT,
             init_sns,
         }
@@ -67,7 +67,7 @@ impl Sandbox for DualSenseStatus {
                     self.show_sn,
                     &self.init_sns,
                 )
-                .unwrap()
+                .unwrap();
             }
             Message::SNToggled(show_sn) => self.show_sn = show_sn,
         }

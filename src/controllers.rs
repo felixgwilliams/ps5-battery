@@ -11,18 +11,21 @@ const PRODUCT_ID_DSEDGE: u16 = 0x0DF2;
 const PRODUCT_ID_DS4: u16 = 0x05C4;
 const PRODUCT_ID_DS4SLIM: u16 = 0x09CC;
 
-const USB_LEN: usize = 64;
-const BT_LEN: usize = 78;
 const BUF_SIZE: usize = 200;
 const REPORT_LEN: usize = 63;
 const DS4_REPORT_LEN: usize = 33;
 const BT_EXTRA_LEN: usize = 13;
 
+const DS4_BT_OFFSET: usize = 4;
+const DS4_USB_OFFSET: usize = 1;
+const DS_BT_OFFSET: usize = 2;
+const DS_USB_OFFSET: usize = 1;
+
 pub struct DeviceFilterer<'a, T: AsRef<str>> {
     pub serial_numbers: Option<&'a [T]>,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum ControllerType {
     DualSense,
     DualSenseEdge,
@@ -31,10 +34,10 @@ pub enum ControllerType {
 }
 
 impl ControllerType {
-    pub fn name(&self) -> String {
+    pub fn name(self) -> String {
         match self {
-            ControllerType::DualSense | ControllerType::DualSenseEdge => "Dualsense".into(),
-            ControllerType::DualShock4 | ControllerType::DualShock4Slim => "DualShock 4".into(),
+            Self::DualSense | Self::DualSenseEdge => "Dualsense".into(),
+            Self::DualShock4 | Self::DualShock4Slim => "DualShock 4".into(),
         }
     }
 }
@@ -45,7 +48,7 @@ pub struct TypedDevice<'a> {
     pub conn_type: ConnType,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum ReadyState {
     Ready,
     Pending,
@@ -101,7 +104,7 @@ impl<'a> TypedDevice<'a> {
             status = None;
         }
         Ok(Controller {
-            serial_number: self.serial_number().map(|x| x.to_owned()),
+            serial_number: self.serial_number().map(std::borrow::ToOwned::to_owned),
             conn_type: self.conn_type,
             type_: self.controller_type,
             status,
@@ -179,16 +182,16 @@ pub fn read_battery_state_dualsense(battery_byte: u8) -> Battery {
     };
     Battery {
         state,
-        level: level as f64 / 8.0f64,
+        level: f64::from(level) / 8.0f64,
     }
 }
 pub fn read_battery_state_ds4(battery_byte: u8) -> Battery {
     let level_byte = battery_byte & 0x0F;
     let cable_state = (battery_byte >> 4) & 0x01;
     let (state, level) = if cable_state == 0 {
-        (ChargeState::Discharging, level_byte as f64 / 8.0)
+        (ChargeState::Discharging, f64::from(level_byte) / 8.0)
     } else {
-        (ChargeState::Charging, level_byte as f64 / 11.0)
+        (ChargeState::Charging, f64::from(level_byte) / 11.0)
     };
 
     Battery { state, level }
@@ -200,6 +203,7 @@ impl Display for ChargeState {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PlugState {
     headphones: bool,
@@ -211,7 +215,7 @@ pub struct PlugState {
     plugged_dock: bool,
 }
 
-pub fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
+pub const fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
     let usb_power = (plug_byte & 0x10) > 0;
     let headphones = (plug_byte & 0x20) > 0;
     let mic = (plug_byte & 0x40) > 0;
@@ -227,7 +231,7 @@ pub fn read_plug_state_dualsense(plug_byte: u8) -> PlugState {
         plugged_dock: false,
     }
 }
-pub fn read_plug_state_ds4(plug_byte: u8) -> PlugState {
+pub const fn read_plug_state_ds4(plug_byte: u8) -> PlugState {
     let headphones = (plug_byte & 0x01) > 0;
     let mic = (plug_byte & 0x02) > 0;
     let muted = (plug_byte & 0x04) > 0;
@@ -281,19 +285,6 @@ pub enum ConnType {
     Usb,
 }
 
-impl TryFrom<usize> for ConnType {
-    type Error = anyhow::Error;
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        match value {
-            USB_LEN => Ok(ConnType::Usb),
-            BT_LEN => Ok(ConnType::Bluetooth),
-            _ => {
-                bail!("Unknown report length")
-            }
-        }
-    }
-}
-
 pub enum Report {
     DsBluetooth([u8; REPORT_LEN], [u8; BT_EXTRA_LEN]),
     DsUSB([u8; REPORT_LEN]),
@@ -301,20 +292,22 @@ pub enum Report {
     D4Bluetooth([u8; DS4_REPORT_LEN]),
 }
 impl Report {
-    fn get_plug(&self) -> PlugState {
+    const fn get_plug(&self) -> PlugState {
         match self {
-            Report::DsBluetooth(ds_report, _) => read_plug_state_dualsense(ds_report[53]),
-            Report::DsUSB(ds_report) => read_plug_state_dualsense(ds_report[53]),
-            Report::D4Bluetooth(d4_report) | Report::D4USB(d4_report) => {
+            Self::DsUSB(ds_report) | Self::DsBluetooth(ds_report, _) => {
+                read_plug_state_dualsense(ds_report[53])
+            }
+            Self::D4Bluetooth(d4_report) | Self::D4USB(d4_report) => {
                 read_plug_state_ds4(d4_report[29])
             }
         }
     }
     fn get_battery(&self) -> Battery {
         match self {
-            Report::DsBluetooth(ds_report, _) => read_battery_state_dualsense(ds_report[52]),
-            Report::DsUSB(ds_report) => read_battery_state_dualsense(ds_report[52]),
-            Report::D4Bluetooth(d4_report) | Report::D4USB(d4_report) => {
+            Self::DsUSB(ds_report) | Self::DsBluetooth(ds_report, _) => {
+                read_battery_state_dualsense(ds_report[52])
+            }
+            Self::D4Bluetooth(d4_report) | Self::D4USB(d4_report) => {
                 read_battery_state_ds4(d4_report[29])
             }
         }
@@ -337,27 +330,31 @@ fn get_report(
     conn_type: ConnType,
     controller_type: ControllerType,
 ) -> Result<Option<Report>, anyhow::Error> {
+    #[allow(clippy::range_plus_one)]
     match controller_type {
         ControllerType::DualSense | ControllerType::DualSenseEdge => {
             Ok(match (conn_type, raw_report[0]) {
                 (ConnType::Bluetooth, 0x31) => Some(Report::DsBluetooth(
-                    raw_report[2..REPORT_LEN + 2].try_into().unwrap(),
-                    raw_report[REPORT_LEN + 2..REPORT_LEN + BT_EXTRA_LEN + 2].try_into()?,
+                    raw_report[DS_BT_OFFSET..REPORT_LEN + DS_BT_OFFSET]
+                        .try_into()
+                        .unwrap(),
+                    raw_report[REPORT_LEN + DS_BT_OFFSET..REPORT_LEN + BT_EXTRA_LEN + DS_BT_OFFSET]
+                        .try_into()?,
                 )),
                 (ConnType::Bluetooth, _) => None,
-                (ConnType::Usb, _) => {
-                    Some(Report::DsUSB(raw_report[1..REPORT_LEN + 1].try_into()?))
-                }
+                (ConnType::Usb, _) => Some(Report::DsUSB(
+                    raw_report[DS_USB_OFFSET..REPORT_LEN + DS_USB_OFFSET].try_into()?,
+                )),
             })
         }
         ControllerType::DualShock4 | ControllerType::DualShock4Slim => {
             Ok(match (conn_type, raw_report[0]) {
                 (ConnType::Bluetooth, 0x01) => None,
-                (ConnType::Usb, _) => {
-                    Some(Report::D4USB(raw_report[1..DS4_REPORT_LEN + 1].try_into()?))
-                }
+                (ConnType::Usb, _) => Some(Report::D4USB(
+                    raw_report[DS4_USB_OFFSET..DS4_REPORT_LEN + DS4_USB_OFFSET].try_into()?,
+                )),
                 (ConnType::Bluetooth, _) => Some(Report::D4Bluetooth(
-                    raw_report[4..DS4_REPORT_LEN + 3].try_into()?,
+                    raw_report[DS4_BT_OFFSET..DS4_REPORT_LEN + DS4_BT_OFFSET].try_into()?,
                 )),
             })
         }

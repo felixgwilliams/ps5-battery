@@ -37,6 +37,7 @@ fn print_ds_info<T: Display, W: std::fmt::Write>(
     Ok(())
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
     buf: &mut W,
     api: &HidApi,
@@ -60,7 +61,7 @@ pub fn print_all_ds_info<T: AsRef<str>, W: std::fmt::Write>(
         print_ds_info(buf, i + 1, api, &mut device, show_serial_number)?;
     }
     if !device_found {
-        writeln!(buf, "No Controllers Found").unwrap();
+        writeln!(buf, "No Dualsenses Found").unwrap();
     }
     Ok(())
 }
