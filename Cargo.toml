@@ -1,24 +1,32 @@
 [package]
 name = "ps5-battery"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
+description = "A utility for viewing the battery status of DualSense and DS4 Controllers"
+license = "MIT"
+repository = "https://github.com/felixgwilliams/ps5-battery"
+homepage = "https://github.com/felixgwilliams/ps5-battery"
+categories = ["hardware-support"]
+keywords = ["gamepad", "battery"]
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.82"
-clap = { version = "4.5.4", features = ["derive"] }
-hidapi = { version = "2.6.1", features = [] }
-iced = { version = "0.12.1", default-features = false, features = [
+anyhow = "^1.0.82"
+clap = { version = "^4.5.4", features = ["derive"], optional = true }
+hidapi = { version = "^2.6.1", features = [] }
+iced = { version = "^0.12.1", default-features = false, features = [
     "fira-sans",
 ], optional = true }
 
 [features]
 gui = ["iced", "image", "winres"]
+cli = ["clap"]
 default = ["gui"]
 
 [build-dependencies]
-winres = { version = "0.1.12", optional = true }
-image = { version = "0.25.1", optional = true, default-features = false, features = [
+winres = { version = "^0.1.12", optional = true }
+image = { version = "^0.25.1", optional = true, default-features = false, features = [
     "png",
 ] }
